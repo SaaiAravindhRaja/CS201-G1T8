@@ -154,10 +154,3 @@ This repository contains the full source code and documentation to be submitted 
 - `README.md` at repo root explains how to run the code (this file)
 
 ---
-
-## 📞 Contact
-Reach out to any team member via their GitHub profiles listed above.
-
----
-
-SMU • CS201 Data Structures and Algorithms • AY2025/26 Term 1
