@@ -2,12 +2,6 @@
 
 ## Skytrax User Reviews Dataset Analysis
 
-<div align="center">
-	<img src="https://img.shields.io/badge/Java-ED8B00?style=for-the-badge&logo=java&logoColor=white" alt="Java"/>
-	<img src="https://img.shields.io/badge/Data%20Structures-Algorithm-blue?style=for-the-badge" alt="Data Structures"/>
-	<img src="https://img.shields.io/badge/SMU-CS201-red?style=for-the-badge" alt="SMU CS201"/>
-</div>
-
 ---
 
 ## 👥 Team G1T8 Members
