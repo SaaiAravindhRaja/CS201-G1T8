@@ -3,5 +3,6 @@
 from .base import Index
 from .array_scan import ArrayScanIndex
 from .inverted import InvertedIndex
+from .trie import TrieIndex
 
-__all__ = ["Index", "ArrayScanIndex", "InvertedIndex"]
+__all__ = ["Index", "ArrayScanIndex", "InvertedIndex", "TrieIndex"]
