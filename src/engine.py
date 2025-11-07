@@ -45,7 +45,7 @@ class SearchEngine:
     def _match_tokens(self, tokens: Sequence[str], match_mode: str) -> List[str]:
         matching: Set[str]
         if match_mode == "and":
-            matching = self._index.lookup_term(tokens[0])
+            matching = self._index.lookup_term(tokens[0]).copy()
             for token in tokens[1:]:
                 matching &= self._index.lookup_term(token)
                 if not matching:

@@ -3,6 +3,6 @@
 from .base import Index
 from .array_scan import ArrayScanIndex
 from .inverted import InvertedIndex
-from .trie import TrieIndex
+from .bloom_filter import BloomFilterIndex
 
-__all__ = ["Index", "ArrayScanIndex", "InvertedIndex", "TrieIndex"]
+__all__ = ["Index", "ArrayScanIndex", "InvertedIndex", "BloomFilterIndex"]
