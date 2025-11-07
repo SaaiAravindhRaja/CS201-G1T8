@@ -69,19 +69,17 @@ def get_index_statistics(index: IndexBase) -> Dict[str, int]:
     """Extract statistics about the index structure."""
     stats = {
         'vocabulary_size': 0,
-        'total_postings': 0,
         'avg_posting_length': 0
     }
     
     try:
         if hasattr(index, '_postings'):  # InvertedIndex
             stats['vocabulary_size'] = len(index._postings)
-            stats['total_postings'] = sum(len(posting) for posting in index._postings.values())
+            total_postings = sum(len(posting) for posting in index._postings.values())
             if stats['vocabulary_size'] > 0:
-                stats['avg_posting_length'] = stats['total_postings'] / stats['vocabulary_size']
+                stats['avg_posting_length'] = total_postings / stats['vocabulary_size']
         elif hasattr(index, '_documents'):  # ArrayScanIndex
             stats['vocabulary_size'] = 0  # Not applicable
-            stats['total_postings'] = sum(len(tokens) for tokens in index._documents.values())
         elif hasattr(index, '_root'):  # TrieIndex
             def count_nodes(node):
                 if node is None:
@@ -336,7 +334,6 @@ def main(argv: Iterable[str]) -> None:
                 "peak_memory_mib": peak_mem,
                 "index_memory_mib": actual_mem,
                 "vocabulary_size": stats['vocabulary_size'],
-                "total_postings": stats['total_postings'],
                 "avg_posting_length": stats['avg_posting_length'],
             }
             
@@ -351,7 +348,6 @@ def main(argv: Iterable[str]) -> None:
             print(f"  Peak Memory:     {peak_mem:.2f} MiB")
             print(f"  Index Memory:    {actual_mem:.2f} MiB")
             print(f"  Vocabulary:      {stats['vocabulary_size']:,} unique terms")
-            print(f"  Total Postings:  {stats['total_postings']:,}")
             if stats['avg_posting_length'] > 0:
                 print(f"  Avg Post. Len:   {stats['avg_posting_length']:.1f}")
             
