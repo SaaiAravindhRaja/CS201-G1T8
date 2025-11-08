@@ -13,15 +13,17 @@ class BloomFilterIndex(Index):
     def __init__(self, size: int = 1_000_000, num_hashes: int = 3) -> None:
         """
         Initialize bloom filter.
-        
+
         Args:
             size: Bit array size (larger = fewer false positives, more memory)
             num_hashes: Number of hash functions (more = fewer false positives, slower)
         """
         self._size = size
         self._num_hashes = num_hashes
-        self._bits = [False] * size
-        self._documents: dict[str, set[str]] = {}  # Store docs for verification
+        # use a compact bytearray for the bitset (0/1 values) instead of list[bool]
+        self._bits = bytearray(size)
+        # store lowercased token sets for verification
+        self._documents: dict[str, set[str]] = {}
 
     def add_document(
         self,
@@ -33,15 +35,15 @@ class BloomFilterIndex(Index):
         
         Time: O(m·k) where m = unique tokens, k = num_hashes
         """
-        # Store document tokens for verification phase
-        token_set = set(tokens)
+        # Store lowercased document tokens for verification phase
+        token_set = {t.lower() for t in tokens}
         self._documents[doc_id] = token_set
-        
+
         # Add each token to bloom filter by setting k bits
         for token in token_set:
             for i in range(self._num_hashes):
                 hash_val = self._hash(token, i)
-                self._bits[hash_val] = True
+                self._bits[hash_val] = 1
 
     def _hash(self, term: str, seed: int) -> int:
         """
@@ -69,21 +71,21 @@ class BloomFilterIndex(Index):
         - Rare terms: 0.001ms (bloom says NO)
         - Common terms: 8-10ms (bloom says MAYBE, must verify)
         """
+        term_lower = term.lower()
+
         # Phase 1: Bloom filter negative check
         for i in range(self._num_hashes):
-            hash_val = self._hash(term, i)
-            if not self._bits[hash_val]:
+            hash_val = self._hash(term_lower, i)
+            if self._bits[hash_val] == 0:
                 # Definitely not present! Fast path.
                 return set()
-        
-        # Phase 2: Bloom filter says "maybe present"
-        # Could be true positive OR false positive
-        # Must verify by scanning all documents
+
+        # Phase 2: Bloom filter says "maybe present" — verify by scanning stored tokens
         result = set()
         for doc_id, tokens in self._documents.items():
-            if term in tokens:
+            if term_lower in tokens:
                 result.add(doc_id)
-        
+
         return result
 
     def get_statistics(self) -> dict:
@@ -97,10 +99,10 @@ class BloomFilterIndex(Index):
         """
         bits_set = sum(self._bits)
         load_factor = bits_set / self._size
-        
+
         # Theoretical false positive rate: (bits_set / size)^k
         theoretical_fpr = load_factor ** self._num_hashes
-        
+
         return {
             "size": self._size,
             "num_hashes": self._num_hashes,

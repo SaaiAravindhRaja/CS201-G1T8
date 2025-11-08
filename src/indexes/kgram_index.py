@@ -42,11 +42,11 @@ class KGramIndex(Index):
 
         Time: O(sum of (len(token) - k + 1) for each token)
         """
-        token_set = set(tokens)
+        # store lowercase tokens for consistent matching & cheaper verification
+        token_set = {t.lower() for t in tokens}
         self._documents[doc_id] = token_set
 
-        for token in token_set:
-            token_lower = token.lower()
+        for token_lower in token_set:
             # For short tokens, index the whole token as a single gram
             if len(token_lower) < self.k:
                 self._postings[token_lower].add(doc_id)
@@ -98,9 +98,9 @@ class KGramIndex(Index):
         # (gram collision). Verify by checking if term appears in any token.
         results = set()
         for doc_id in candidates:
-            # Check if term appears as substring in any original token
+            # tokens are stored lowercased already
             for token in self._documents[doc_id]:
-                if term_lower in token.lower():
+                if term_lower in token:
                     results.add(doc_id)
                     break
         return results

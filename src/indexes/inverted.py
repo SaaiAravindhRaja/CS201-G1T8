@@ -19,11 +19,12 @@ class InvertedIndex(Index):
         doc_id: str,
         tokens: Sequence[str],
     ) -> None:
-        for token in set(tokens):
+        # canonicalize tokens to lowercase to avoid case-sensitivity bugs
+        for token in {t.lower() for t in tokens}:
             self._postings[token].add(doc_id)
 
     def lookup_term(self, term: str) -> Set[str]:
-        return self._postings.get(term, set())
+        return set(self._postings.get(term.lower(), set()))
 
 
 __all__ = ["InvertedIndex"]
