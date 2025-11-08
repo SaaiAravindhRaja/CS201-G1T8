@@ -43,8 +43,6 @@ class SuffixArrayIndex(Index):
         """Add document by storing its tokens.
 
         Note: The suffix array is rebuilt lazily on first lookup after additions.
-
-        Time: O(1) for adding, O(n log n) for rebuild on next lookup
         """
         token_set = set(tokens)
         self._documents[doc_id] = token_set
@@ -70,8 +68,6 @@ class SuffixArrayIndex(Index):
         for doc_id, tokens in self._documents.items():
             for token in tokens:
                 token_lower = token.lower()
-                start_pos = len(text_parts)
-
                 # Add each character of the token
                 for char in token_lower:
                     text_parts.append(char)
@@ -84,10 +80,31 @@ class SuffixArrayIndex(Index):
         self._text = "".join(text_parts)
         self._position_map = position_map
 
-        # Build suffix array using simple O(n^2 log n) approach
-        # For production, consider using more efficient algorithms like SA-IS
         n = len(self._text)
-        self._suffix_array = sorted(range(n), key=lambda i: self._text[i:])
+        if n == 0:
+            self._suffix_array = []
+            self._needs_rebuild = False
+            return
+
+        # Build suffix array using prefix-doubling (O(n log n))
+        sa = list(range(n))
+        rank = [ord(c) for c in self._text]
+        tmp = [0] * n
+        k = 1
+
+        while True:
+            sa.sort(key=lambda i: (rank[i], rank[i + k] if i + k < n else -1))
+            tmp[sa[0]] = 0
+            for i in range(1, n):
+                prev = (rank[sa[i - 1]], rank[sa[i - 1] + k] if sa[i - 1] + k < n else -1)
+                curr = (rank[sa[i]], rank[sa[i] + k] if sa[i] + k < n else -1)
+                tmp[sa[i]] = tmp[sa[i - 1]] + (curr != prev)
+            rank = tmp.copy()
+            if rank[sa[-1]] == n - 1:
+                break
+            k <<= 1
+
+        self._suffix_array = sa
         self._needs_rebuild = False
 
     def lookup_term(self, term: str) -> Set[str]:
@@ -98,9 +115,6 @@ class SuffixArrayIndex(Index):
         2. Use binary search to find the range of suffixes starting with term
         3. Collect document IDs from matching suffix positions
         4. Verify that the term actually appears in the document tokens
-
-        Time: O(m log n + k) where m is term length, n is text length,
-              k is number of results
         """
         if self._needs_rebuild:
             self._rebuild_suffix_array()
@@ -124,13 +138,10 @@ class SuffixArrayIndex(Index):
             suffix_pos = self._suffix_array[i]
             if suffix_pos < len(self._position_map):
                 doc_id, token = self._position_map[suffix_pos]
-                if doc_id not in candidate_docs:
-                    candidate_docs[doc_id] = set()
-                candidate_docs[doc_id].add(token)
+                candidate_docs.setdefault(doc_id, set()).add(token)
 
         # Verify that term actually appears in the tokens
-        # (to handle cases where term spans across token boundaries)
-        results = set()
+        results: Set[str] = set()
         for doc_id, tokens in candidate_docs.items():
             for token in tokens:
                 if term_lower in token.lower():
