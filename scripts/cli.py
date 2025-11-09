@@ -83,6 +83,11 @@ HELP = """
       
       Example: query --patterns "wifi,free" --mode and --show-text
 
+📊 ANALYSIS:
+  status              Show current backend and dataset information
+  compare --patterns "a,b,c" --mode <and|or>
+      Compare all backends on the same query
+
 💡 OTHER:
   help     Show this help message
   exit     Quit the CLI
@@ -104,16 +109,30 @@ class State:
 def load_records(limit: int, dataset: str) -> List[tuple[str, str]]:
     dataset = dataset.lower()
     if dataset not in DATASETS:
-        raise ValueError("dataset must be one of airline, airport, lounge, seat")
+        raise ValueError(f"dataset must be one of {', '.join(DATASETS.keys())}")
     csv_path = DATASETS[dataset]
+    
+    # File existence check
+    if not csv_path.exists():
+        raise FileNotFoundError(f"Dataset file not found: {csv_path}")
+    
     source_tag = dataset
     out: List[tuple[str, str]] = []
+    print(f"Loading {dataset} dataset (limit: {limit})...", end="", flush=True)
+    
     for doc_id, text in iter_reviews_from_csv(csv_path, source_tag):
         out.append((doc_id, text))
+        # Progress indicator for large datasets
+        if len(out) % 10000 == 0:
+            print(f"\rLoaded {len(out)} records...", end="", flush=True)
         if len(out) >= limit:
             break
+    
     if not out:
-        raise ValueError("dataset appears empty")
+        print()
+        raise ValueError(f"No valid records found in {dataset} dataset")
+    
+    print(f"\rLoaded {len(out)} records successfully.    ")
     return out
 
 
@@ -121,12 +140,24 @@ def run_index_query(index_obj, records: Sequence[tuple[str, str]], patterns: Seq
     match_all = mode == "and"
     matched: List[str] = []
     t0 = time.perf_counter()
-    for doc_id, _ in records:
-        hits = [bool(index_obj.lookup_term(pattern, doc_id)) for pattern in patterns]
-        if match_all and all(hits):
-            matched.append(doc_id)
-        elif not match_all and any(hits):
-            matched.append(doc_id)
+    
+    # Optimize for single pattern case
+    if len(patterns) == 1:
+        for doc_id, _ in records:
+            if index_obj.lookup_term(patterns[0], doc_id):
+                matched.append(doc_id)
+    else:
+        # Multi-pattern logic with short-circuit evaluation
+        for doc_id, _ in records:
+            if match_all:
+                # For AND mode, stop checking as soon as one pattern fails
+                if all(bool(index_obj.lookup_term(pattern, doc_id)) for pattern in patterns):
+                    matched.append(doc_id)
+            else:
+                # For OR mode, stop checking as soon as one pattern succeeds
+                if any(bool(index_obj.lookup_term(pattern, doc_id)) for pattern in patterns):
+                    matched.append(doc_id)
+    
     elapsed = (time.perf_counter() - t0) * 1000.0
     return elapsed, matched
 
@@ -191,7 +222,7 @@ def handle_backend(st: State, args: List[str]) -> None:
     
     try:
         records = load_records(limit, dataset)
-    except ValueError as exc:
+    except (ValueError, FileNotFoundError) as exc:
         print(f"❌ {exc}")
         return
 
@@ -313,6 +344,85 @@ def show_algorithm_info(algorithm: str | None = None) -> None:
         print("\n" + "="*80 + "\n")
 
 
+def handle_status(st: State) -> None:
+    """Display current CLI state."""
+    if not st.backend:
+        print("\n❌ No backend loaded. Use 'backend' command to get started.")
+        print("   Example: backend ac airline 1000\n")
+        return
+    
+    print(f"\n📊 CURRENT STATUS:")
+    print(f"   Backend: {ALGORITHMS[st.backend]['name']}")
+    print(f"   Dataset: {st.dataset}")
+    print(f"   Documents: {len(st.records):,}")
+    print(f"   Build time: {st.last_build_s:.3f}s")
+    print(f"   Status: ✅ Ready for queries\n")
+
+
+def handle_compare(st: State, args: List[str]) -> None:
+    """Compare all backends on the same query."""
+    if not st.records:
+        print("\n❌ Load a dataset first with 'backend' command.")
+        print("   Example: backend ac airline 1000\n")
+        return
+    
+    try:
+        patterns, mode, _ = parse_patterns(args)
+    except ValueError as exc:
+        print(f"❌ {exc}")
+        return
+    
+    backends_to_test = ["kmp", "ac", "sa", "salog2", "kgram"]
+    results = []
+    
+    print(f"\n🔬 BENCHMARK: Comparing all backends")
+    print(f"   Documents: {len(st.records):,}")
+    print(f"   Patterns: {patterns}")
+    print(f"   Mode: {mode.upper()}\n")
+    
+    for backend in backends_to_test:
+        print(f"   Testing {ALGORITHMS[backend]['name']}...", end="", flush=True)
+        try:
+            # Build backend
+            t0 = time.perf_counter()
+            if backend == "ac":
+                ac = AhoCorasick()
+                ac.build({doc: txt for doc, txt in st.records})
+                build_time = time.perf_counter() - t0
+                query_time, docs = run_ac_query(ac, st.records, patterns, mode)
+            else:
+                matcher = {
+                    "kmp": KMP,
+                    "kgram": KGram,
+                    "sa": SuffixArray,
+                    "salog2": SuffixArrayLogSq,
+                }[backend]()
+                matcher.build(dict(st.records))
+                build_time = time.perf_counter() - t0
+                query_time, docs = run_index_query(matcher, st.records, patterns, mode)
+            
+            results.append((backend, build_time, query_time, len(docs)))
+            print(f"\r   {ALGORITHMS[backend]['name']:<40} ✓")
+        except Exception as e:
+            print(f"\r   {ALGORITHMS[backend]['name']:<40} ✗ (error: {e})")
+            results.append((backend, 0, 0, -1))
+    
+    # Display comparison table
+    print(f"\n{'Algorithm':<25} {'Build (s)':<12} {'Query (ms)':<12} {'Matches':<10}")
+    print("-" * 65)
+    for backend, build_t, query_t, matches in results:
+        if matches == -1:
+            print(f"{ALGORITHMS[backend]['name']:<25} {'ERROR':<12} {'ERROR':<12} {'ERROR':<10}")
+        else:
+            print(f"{ALGORITHMS[backend]['name']:<25} {build_t:<12.3f} {query_t:<12.3f} {matches:<10,}")
+    
+    # Find fastest
+    valid_results = [(b, qt) for b, _, qt, m in results if m != -1]
+    if valid_results:
+        fastest = min(valid_results, key=lambda x: x[1])
+        print(f"\n🏆 Fastest query: {ALGORITHMS[fastest[0]]['name']} ({fastest[1]:.3f}ms)\n")
+
+
 def repl() -> None:
     st = State()
     print("\n" + "="*80)
@@ -349,6 +459,10 @@ def repl() -> None:
             handle_backend(st, args)
         elif cmd == "query":
             handle_query(st, args)
+        elif cmd == "status":
+            handle_status(st)
+        elif cmd == "compare":
+            handle_compare(st, args)
         else:
             print(f"❌ Unknown command: '{cmd}'. Type 'help' for available commands.")
 
