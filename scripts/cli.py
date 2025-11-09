@@ -6,6 +6,7 @@ from __future__ import annotations
 import shlex
 import sys
 import time
+import tracemalloc
 from pathlib import Path
 from typing import Dict, Iterable, List, Sequence
 
@@ -89,9 +90,8 @@ HELP = """
       Compare all backends on the same query
 
 💡 OTHER:
-  help     Show this help message
-  exit     Quit the CLI
-  quit     Quit the CLI
+  help         Show this help message
+  exit / quit  Quit the CLI
 
 """
 
@@ -103,6 +103,7 @@ class State:
         self.index_obj: object | None = None
         self.ac: AhoCorasick | None = None
         self.last_build_s: float = 0.0
+        self.peak_memory_mb: float = 0.0
         self.dataset: str = ""
 
 
@@ -203,11 +204,12 @@ def handle_backend(st: State, args: List[str]) -> None:
     if len(args) < 2 or args[0] not in ("kmp", "ac", "sa", "salog2", "kgram"):
         print("❌ Usage: backend <kmp|ac|sa|salog2|kgram> <dataset> [limit]")
         print("   Example: backend ac airline 1000")
+        print(f"   Available datasets: {', '.join(DATASETS.keys())}")
         print("   Type 'info' to see algorithm comparison")
         return
     
     backend = args[0]
-    dataset = args[1]
+    dataset = args[1].lower()
     limit = 50000
     
     if len(args) >= 3:
@@ -224,6 +226,8 @@ def handle_backend(st: State, args: List[str]) -> None:
         records = load_records(limit, dataset)
     except (ValueError, FileNotFoundError) as exc:
         print(f"❌ {exc}")
+        if "must be one of" in str(exc):
+            print(f"   💡 Tip: Available datasets are {', '.join(DATASETS.keys())}")
         return
 
     st.records = records
@@ -232,6 +236,9 @@ def handle_backend(st: State, args: List[str]) -> None:
     st.index_obj = None
     st.ac = None
 
+    # Start memory tracking
+    tracemalloc.start()
+    
     t0 = time.perf_counter()
     if backend == "ac":
         st.ac = AhoCorasick()
@@ -247,12 +254,62 @@ def handle_backend(st: State, args: List[str]) -> None:
         st.index_obj = matcher
     st.last_build_s = time.perf_counter() - t0
     
+    # Get peak memory usage
+    _, peak = tracemalloc.get_traced_memory()
+    st.peak_memory_mb = peak / (1024 * 1024)
+    tracemalloc.stop()
+    
+    # Format build time in seconds (show minutes if >60s)
+    if st.last_build_s < 60:
+        build_time_str = f"{st.last_build_s:.3f}s"
+    else:
+        mins = int(st.last_build_s // 60)
+        secs = st.last_build_s % 60
+        build_time_str = f"{st.last_build_s:.3f}s ({mins}m {secs:.1f}s)"
+    
     print(f"\n✅ Backend ready!")
     print(f"   Algorithm: {ALGORITHMS[backend]['name']}")
     print(f"   Dataset: {dataset}")
     print(f"   Documents: {len(records):,}")
-    print(f"   Build time: {st.last_build_s:.3f}s")
+    print(f"   Build time: {build_time_str}")
+    print(f"   Memory: {st.peak_memory_mb:.2f} MiB")
     print(f"\n💡 Next: query --patterns \"wifi,delay\" --mode and\n")
+
+
+def post_query_menu(st: State) -> None:
+    """Interactive menu after query results."""
+    print("\n" + "─"*60)
+    print("What would you like to do next?")
+    print("  1️⃣  Perform another query with same algorithm")
+    print("  2️⃣  Try a different algorithm")
+    print("  3️⃣  Exit")
+    print("─"*60)
+    
+    while True:
+        try:
+            choice = input("\nYour choice (1-3): ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print("\n\n👋 Goodbye!")
+            sys.exit(0)
+        
+        if choice == "1":
+            print("\n💡 Enter your next query below:")
+            print("   Example: query --patterns \"wifi,delay\" --mode and\n")
+            return  # Return to main loop for another query
+        
+        elif choice == "2":
+            print("\n🔄 Switching algorithm...")
+            print(f"\n💡 Current: {ALGORITHMS[st.backend]['name']}")
+            print("   Type 'info' to compare all algorithms")
+            print("   Then use: backend <algorithm> <dataset> [limit]\n")
+            return  # Return to main loop
+        
+        elif choice == "3":
+            print("\n👋 Goodbye!")
+            sys.exit(0)
+        
+        else:
+            print("❌ Invalid choice. Please enter 1, 2, or 3.")
 
 
 def handle_query(st: State, args: List[str]) -> None:
@@ -282,10 +339,25 @@ def handle_query(st: State, args: List[str]) -> None:
             return
         ms, docs = run_index_query(st.index_obj, st.records, patterns, mode)
 
+    # Convert query time from ms to seconds
+    query_seconds = ms / 1000.0
+    
+    # Format build time
+    if st.last_build_s < 60:
+        build_str = f"{st.last_build_s:.3f}s"
+    else:
+        mins = int(st.last_build_s // 60)
+        secs = st.last_build_s % 60
+        build_str = f"{st.last_build_s:.3f}s ({mins}m {secs:.1f}s)"
+    
+    # Format query time in seconds
+    query_str = f"{query_seconds:.3f}s"
+    
     print(f"\n📊 RESULTS:")
     print(f"   Algorithm: {st.backend.upper()}")
-    print(f"   Build time: {st.last_build_s:.3f}s")
-    print(f"   Query time: {ms:.3f}ms")
+    print(f"   Build time: {build_str}")
+    print(f"   Memory: {st.peak_memory_mb:.2f} MiB")
+    print(f"   Query time: {query_str}")
     print(f"   Matches: {len(docs):,} documents")
     
     if show_text:
@@ -304,7 +376,8 @@ def handle_query(st: State, args: List[str]) -> None:
         if len(docs) > 20:
             print(f"   ... and {len(docs) - 20} more")
     
-    print(f"\n💡 Run another query or type 'exit' to quit\n")
+    # Post-query options
+    post_query_menu(st)
 
 
 def show_algorithm_info(algorithm: str | None = None) -> None:
@@ -356,6 +429,7 @@ def handle_status(st: State) -> None:
     print(f"   Dataset: {st.dataset}")
     print(f"   Documents: {len(st.records):,}")
     print(f"   Build time: {st.last_build_s:.3f}s")
+    print(f"   Memory: {st.peak_memory_mb:.2f} MiB")
     print(f"   Status: ✅ Ready for queries\n")
 
 
@@ -383,7 +457,8 @@ def handle_compare(st: State, args: List[str]) -> None:
     for backend in backends_to_test:
         print(f"   Testing {ALGORITHMS[backend]['name']}...", end="", flush=True)
         try:
-            # Build backend
+            # Build backend with memory tracking
+            tracemalloc.start()
             t0 = time.perf_counter()
             if backend == "ac":
                 ac = AhoCorasick()
@@ -401,26 +476,35 @@ def handle_compare(st: State, args: List[str]) -> None:
                 build_time = time.perf_counter() - t0
                 query_time, docs = run_index_query(matcher, st.records, patterns, mode)
             
-            results.append((backend, build_time, query_time, len(docs)))
+            _, peak = tracemalloc.get_traced_memory()
+            memory_mb = peak / (1024 * 1024)
+            tracemalloc.stop()
+            
+            results.append((backend, build_time, query_time, memory_mb, len(docs)))
             print(f"\r   {ALGORITHMS[backend]['name']:<40} ✓")
         except Exception as e:
             print(f"\r   {ALGORITHMS[backend]['name']:<40} ✗ (error: {e})")
-            results.append((backend, 0, 0, -1))
+            results.append((backend, 0, 0, 0, -1))
     
     # Display comparison table
-    print(f"\n{'Algorithm':<25} {'Build (s)':<12} {'Query (ms)':<12} {'Matches':<10}")
-    print("-" * 65)
-    for backend, build_t, query_t, matches in results:
+    print(f"\n{'Algorithm':<25} {'Build (s)':<12} {'Memory (MiB)':<14} {'Query (s)':<12} {'Matches':<10}")
+    print("-" * 80)
+    for backend, build_t, query_t_ms, memory_mb, matches in results:
         if matches == -1:
-            print(f"{ALGORITHMS[backend]['name']:<25} {'ERROR':<12} {'ERROR':<12} {'ERROR':<10}")
+            print(f"{ALGORITHMS[backend]['name']:<25} {'ERROR':<12} {'ERROR':<14} {'ERROR':<12} {'ERROR':<10}")
         else:
-            print(f"{ALGORITHMS[backend]['name']:<25} {build_t:<12.3f} {query_t:<12.3f} {matches:<10,}")
+            query_t_s = query_t_ms / 1000.0  # Convert ms to seconds
+            print(f"{ALGORITHMS[backend]['name']:<25} {build_t:<12.3f} {memory_mb:<14.2f} {query_t_s:<12.3f} {matches:<10,}")
     
-    # Find fastest
-    valid_results = [(b, qt) for b, _, qt, m in results if m != -1]
+    # Find fastest and most memory efficient
+    valid_results = [(b, qt, mem) for b, _, qt, mem, m in results if m != -1]
     if valid_results:
         fastest = min(valid_results, key=lambda x: x[1])
-        print(f"\n🏆 Fastest query: {ALGORITHMS[fastest[0]]['name']} ({fastest[1]:.3f}ms)\n")
+        fastest_s = fastest[1] / 1000.0
+        most_efficient = min(valid_results, key=lambda x: x[2])
+        print(f"\n🏆 Fastest query: {ALGORITHMS[fastest[0]]['name']} ({fastest_s:.3f}s)")
+        print(f"💾 Lowest memory: {ALGORITHMS[most_efficient[0]]['name']} ({most_efficient[2]:.2f} MiB)")
+        print(f"💡 Switch to it with: backend {fastest[0]} {st.dataset}\n")
 
 
 def repl() -> None:
