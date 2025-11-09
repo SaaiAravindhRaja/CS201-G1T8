@@ -62,3 +62,40 @@ The dataset (provided in this repository under `Skytrax User Reviews Dataset/`) 
 
 ---
 
+## 🚀 Quick Start
+
+### Interactive CLI (Recommended)
+
+Run the interactive command-line interface to automatically compare all 5 index implementations:
+
+```bash
+python scripts/cli.py
+```
+
+Or on Windows, simply double-click `run_cli.bat`
+
+**How it works:**
+1. Select a dataset (default: Airlines) - just press Enter for quick start
+2. Enter your search query
+3. Choose AND/OR mode (default: AND)
+4. Set document limit (default: 1,000)
+5. View side-by-side comparison of all 5 indexes
+
+**Navigation:**
+- Type `b` at any prompt to go back to the previous step
+- Type `q` at any prompt to exit immediately
+- Press Enter to use defaults for fastest workflow
+
+**Index Implementations Tested:**
+- **Array Scan** - Linear search baseline
+- **Inverted Index** - Fast keyword lookup
+- **Bloom Filter** - Space-efficient probabilistic
+- **K-Gram Index** - Fuzzy/wildcard matching
+- **Suffix Array** - Substring searches
+
+See [CLI_GUIDE.md](CLI_GUIDE.md) for detailed usage and example output.
+
+### Running Scripts Manually
+
+You can also run individual scripts:
+
