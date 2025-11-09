@@ -1,4 +1,4 @@
-"""Suffix array index for efficient substring pattern matching."""
+"""Reference suffix array index built with O(n log^2 n) prefix-doubling."""
 
 from __future__ import annotations
 
@@ -7,21 +7,12 @@ from typing import Dict, List, Mapping, Optional, Sequence, Set
 from .base import Matcher
 
 
-class SuffixArray(Matcher):
-    """Suffix array index for substring/prefix matching.
-
-    A suffix array is a sorted array of all suffixes of a text. Combined with
-    binary search, it enables efficient substring pattern matching with
-    predictable complexity.
-
-    Trade-offs:
-    - Memory: O(n) where n is total character count across all tokens
-    - Build time: O(n log n) for suffix array construction
-    - Query time: O(m log n + k) where m is pattern length, k is result count
-    - Results: supports substring and prefix matching
+class SuffixArrayLogSq(Matcher):
+    """
+    Suffix Array but O(n log^2 n) for building, using existing sort function.
     """
 
-    _SEPARATOR = "\x00"  # document boundary marker
+    _SEPARATOR = "\x00"
 
     def __init__(self) -> None:
         self._doc_texts: Dict[str, str] = {}
@@ -30,18 +21,13 @@ class SuffixArray(Matcher):
         self._position_doc_ids: List[Optional[str]] = []
         self._position_offsets: List[int] = []
 
-    # ------------------------------------------------------------------
-    # Build phase
-    # ------------------------------------------------------------------
     def build(self, documents: Mapping[str, str]) -> None:
-        """Construct suffix array structures from the full corpus."""
         self._doc_texts = {}
         self._text = ""
         self._suffix_array = []
         self._position_doc_ids = []
         self._position_offsets = []
 
-        # Normalize documents to lowercase full-text and prepare concatenation
         text_parts: List[str] = []
         position_docs: List[Optional[str]] = []
         position_offsets: List[int] = []
@@ -72,7 +58,6 @@ class SuffixArray(Matcher):
     # token normalization removed in raw-text design
 
     def _build_suffix_array(self, text: str) -> List[int]:
-        """Build suffix array using prefix-doubling with radix sorting."""
         n = len(text)
         if n == 0:
             return []
@@ -82,56 +67,23 @@ class SuffixArray(Matcher):
         tmp_rank = [0] * n
         k = 1
 
-        while k < n:
-            sa = self._radix_sort(sa, rank, k)
+        while True:
+            sa.sort(key=lambda i: (rank[i], rank[i + k] if i + k < n else -1))
             tmp_rank[sa[0]] = 0
-            classes = 1
             for i in range(1, n):
                 prev = sa[i - 1]
                 curr = sa[i]
                 prev_pair = (rank[prev], rank[prev + k] if prev + k < n else -1)
                 curr_pair = (rank[curr], rank[curr + k] if curr + k < n else -1)
-                if curr_pair != prev_pair:
-                    classes += 1
-                tmp_rank[curr] = classes - 1
+                tmp_rank[curr] = tmp_rank[prev] + (curr_pair != prev_pair)
             rank, tmp_rank = tmp_rank, rank
-            if classes == n:
+            if rank[sa[-1]] == n - 1:
                 break
             k <<= 1
 
         return sa
 
-    def _radix_sort(self, sa: List[int], rank: List[int], k: int) -> List[int]:
-        """Sort suffix indices by (rank[i], rank[i+k]) using counting sort."""
-        n = len(sa)
-        max_rank = max(rank) + 2  # include sentinel -1
-
-        # Sort by second key
-        sa = self._counting_sort(sa, [rank[i + k] if i + k < n else -1 for i in sa], max_rank)
-        # Sort by first key
-        sa = self._counting_sort(sa, [rank[i] for i in sa], max_rank)
-        return sa
-
-    def _counting_sort(self, sa: List[int], keys: List[int], max_rank: int) -> List[int]:
-        """Stable counting sort of ``sa`` using ``keys`` (same length)."""
-        count = [0] * max_rank
-        offset = 1  # shift to handle -1 sentinel
-        for key in keys:
-            count[key + offset] += 1
-        for i in range(1, max_rank):
-            count[i] += count[i - 1]
-        output = [0] * len(sa)
-        for idx in range(len(sa) - 1, -1, -1):
-            key = keys[idx] + offset
-            count[key] -= 1
-            output[count[key]] = sa[idx]
-        return output
-
-    # ------------------------------------------------------------------
-    # Query phase
-    # ------------------------------------------------------------------
     def lookup_term(self, term: str, doc_id: str) -> List[int]:
-        """Return all positions (offsets) of ``term`` within the given document."""
         if not self._suffix_array or not term:
             return []
 
@@ -140,6 +92,7 @@ class SuffixArray(Matcher):
         right = self._upper_bound(pattern)
         if left == right:
             return []
+
         positions: List[int] = []
         for idx in range(left, right):
             pos = self._suffix_array[idx]
@@ -148,10 +101,9 @@ class SuffixArray(Matcher):
                 positions.append(self._position_offsets[pos])
         return positions
 
-    # candidate doc utility removed; positions are returned directly
+    # candidate-doc utility removed; return positions directly
 
     def _lower_bound(self, pattern: str) -> int:
-        """Return first suffix-array index whose prefix >= pattern."""
         left, right = 0, len(self._suffix_array)
         while left < right:
             mid = (left + right) // 2
@@ -162,7 +114,6 @@ class SuffixArray(Matcher):
         return left
 
     def _upper_bound(self, pattern: str) -> int:
-        """Return first suffix-array index whose prefix > pattern."""
         left, right = 0, len(self._suffix_array)
         pattern_upper = pattern + "\uffff"
         while left < right:
@@ -174,18 +125,13 @@ class SuffixArray(Matcher):
         return left
 
     def _compare_suffix(self, sa_index: int, pattern: str) -> int:
-        """Compare pattern to the suffix referenced by ``sa_index``."""
         pos = self._suffix_array[sa_index]
         suffix = self._text[pos : pos + len(pattern)]
         if suffix == pattern:
             return 0
         return -1 if suffix < pattern else 1
 
-    # ------------------------------------------------------------------
-    # Stats
-    # ------------------------------------------------------------------
     def get_statistics(self) -> dict:
-        """Return statistics about the suffix array index."""
         return {
             "num_documents": len(self._doc_texts),
             "text_length": len(self._text),
@@ -194,4 +140,4 @@ class SuffixArray(Matcher):
         }
 
 
-__all__ = ["SuffixArray"]
+__all__ = ["SuffixArrayLogSq"]

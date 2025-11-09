@@ -25,7 +25,7 @@ from src import SearchEngine
 import inspect
 
 from src import indexes as indexes_module
-from src.indexes.base import Index as IndexBase
+from src.indexes.base import Matcher as MatcherBase
 from src.corpus import iter_reviews_from_csv
 
 DATA_CSV = Path("data/raw/airline.csv")
@@ -36,16 +36,17 @@ def discover_indexes():
     factories = {}
     for name in dir(indexes_module):
         attr = getattr(indexes_module, name)
-        if inspect.isclass(attr) and issubclass(attr, IndexBase) and attr is not IndexBase:
+        if inspect.isclass(attr) and issubclass(attr, MatcherBase) and attr is not MatcherBase:
             factories[name] = attr
     if not factories:
         raise RuntimeError("No index implementations found in src.indexes")
     return factories
 
 QUERIES: Sequence[Tuple[str, str, str]] = [
-    ("single", "legroom", "and"),
-    ("and_terms", "legroom comfortable", "and"),
-    ("or_terms", "legroom spacious", "or"),
+    ("substr_short", "leg", "and"),
+    ("substr_medium", "comfort", "and"),
+    ("prefix", "seat", "and"),
+    ("or_substr", "leg comf", "or"),
 ]
 
 
@@ -71,8 +72,7 @@ def build_engine(factory, records: Sequence[Tuple[str, str]]) -> Tuple[SearchEng
     tracemalloc.start()
     engine = SearchEngine(factory())
     start = time.perf_counter()
-    for doc_id, text in records:
-        engine.add_document(doc_id, text)
+    engine.build(records)
     build_time = time.perf_counter() - start
     _, peak = tracemalloc.get_traced_memory()
     tracemalloc.stop()
@@ -145,8 +145,6 @@ def main(argv: Iterable[str]) -> None:
     records = load_all_records()
     total_docs = len(records)
     limits = [size for size in CORPUS_SIZES if size <= total_docs]
-    if not limits or limits[-1] < total_docs:
-        limits.append(total_docs)
     index_factories = discover_indexes()
     ordered_names = sorted(index_factories.keys())
     print(f"Benchmarking {len(limits)} corpus sizes: {limits}")
