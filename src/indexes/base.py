@@ -1,25 +1,21 @@
-"""Abstract index contract shared by all concrete backends."""
+"""Abstract substring search contract shared by all implementations."""
 
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Sequence, Set
+from typing import Mapping, List
 
 
-class Index(ABC):
-    """Abstract index contract required by :class:`SearchEngine`."""
-
-    @abstractmethod
-    def add_document(
-        self,
-        doc_id: str,
-        tokens: Sequence[str],
-    ) -> None:
-        """Insert one document into the index."""
+class Matcher(ABC):
+    """Abstract data structure to standardize."""
 
     @abstractmethod
-    def lookup_term(self, term: str) -> Set[str]:
-        """Return doc IDs that contain ``term``."""
+    def build(self, documents: Mapping[str, str]) -> None:
+        """Ingest the full corpus as a mapping of ``doc_id -> raw text``."""
+
+    @abstractmethod
+    def lookup_term(self, term: str, doc_id: str) -> List[int]:
+        """Return all positions (0-based) where ``term`` occurs in ``doc_id``."""
 
 
-__all__ = ["Index"]
+__all__ = ["Matcher"]

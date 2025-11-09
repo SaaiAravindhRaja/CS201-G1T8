@@ -1,10 +1,17 @@
-"""Collection of interchangeable index implementations."""
+"""Collection of interchangeable substring search implementations."""
 
-from .base import Index
-from .array_scan import ArrayScanIndex
-from .inverted import InvertedIndex
-from .bloom_filter import BloomFilterIndex
-from .kgram_index import KGramIndex
-from .suffix_array import SuffixArrayIndex
+from .base import Matcher
+from .array_scan import KMP
+from .kgram_index import KGram
+from .suffix_array import SuffixArray
+from .suffix_array_logsq import SuffixArrayLogSq
+from .aho_corasick import AhoCorasick
 
-__all__ = ["Index", "ArrayScanIndex", "InvertedIndex", "BloomFilterIndex", "KGramIndex", "SuffixArrayIndex"]
+__all__ = [
+    "Matcher",
+    "KMP",
+    "KGram",
+    "SuffixArray",
+    "SuffixArrayLogSq",
+    "AhoCorasick",
+]
